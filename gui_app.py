@@ -15,7 +15,7 @@ import concurrent.futures
 from date_picker_dialog import DatePickerDialog
 
 # Importa as funcionalidades de outros módulos
-from api_handler import construir_url_api, obter_dados_chamadas
+from api_handler import construir_url_api, obter_dados_completos
 from recording_downloader import baixar_gravacao
 import config
 
@@ -149,7 +149,7 @@ class WidevoiceDownloaderGUI:
             logger.error(f"Erro ao habilitar botão 'Salvar Configurações': {e}")
 
 
-    def actualizar_status(self, mensagem): # Corrigi o typo aqui
+    def atualizar_status(self, mensagem): # Corrigi o typo aqui
         """Atualiza a área de texto de status (seguro para chamar de qualquer thread)."""
         try:
             self.master.after(0, self._inserir_status, mensagem)
@@ -213,7 +213,7 @@ class WidevoiceDownloaderGUI:
         """Inicia o processo de download em uma thread separada."""
         self.download_button.config(state=tk.DISABLED)
         self.save_button.config(state=tk.DISABLED)
-        self.actualizar_status("Iniciando processo de download...") # Use a função corrigida
+        self.atualizar_status("Iniciando processo de download...") # Use a função corrigida
         logger.info("Botão 'Iniciar Download' clicado.")
 
         # Limpa status e progresso para um novo download
@@ -238,7 +238,7 @@ class WidevoiceDownloaderGUI:
         # Validação básica
         if not all([url_base, login, token, datainicio_str, datafim_str, diretorio_destino]):
             mensagem_erro = "Erro: Todos os campos precisam ser preenchidos para iniciar o download."
-            self.actualizar_status(mensagem_erro) # Use a função corrigida
+            self.atualizar_status(mensagem_erro) # Use a função corrigida
             logger.warning(mensagem_erro)
             self.master.after(0, self.download_button.config, state=tk.NORMAL)
             self.master.after(0, self.save_button.config, state=tk.NORMAL)
@@ -251,7 +251,7 @@ class WidevoiceDownloaderGUI:
             logger.info("Formato de data validado com sucesso.")
         except ValueError:
             mensagem_erro = "Erro: Formato de data/hora inválido. UseYYYY-MM-DD HH:mm:ss."
-            self.actualizar_status(mensagem_erro) # Use a função corrigida
+            self.atualizar_status(mensagem_erro) # Use a função corrigida
             logger.warning(mensagem_erro)
             self.master.after(0, self.download_button.config, state=tk.NORMAL)
             self.master.after(0, self.save_button.config, state=tk.NORMAL)
@@ -275,12 +275,12 @@ class WidevoiceDownloaderGUI:
 
         if not all([url_base, login, token, diretorio_destino]):
              mensagem_aviso = "Aviso: Preencha URL, Login, Token e Diretório de Destino para salvar as configurações."
-             self.actualizar_status(mensagem_aviso) # Use a função corrigida
+             self.atualizar_status(mensagem_aviso) # Use a função corrigida
              logger.warning(mensagem_aviso)
              return
 
         self.salvar_configuracoes(url_base, login, token, diretorio_destino)
-        self.actualizar_status("Configurações (incluindo Token) salvas com sucesso.") # Use a função corrigida
+        self.atualizar_status("Configurações (incluindo Token) salvas com sucesso.") # Use a função corrigida
         logger.info("Botão 'Salvar Configurações' clicado. Configurações coletadas e salvando (incluindo Token).")
 
 
@@ -298,7 +298,7 @@ class WidevoiceDownloaderGUI:
             logger.info(f"Configurações (incluindo Token) salvas em {CONFIG_FILE}")
         except Exception as e:
             mensagem_erro = f"Erro ao salvar configurações em {CONFIG_FILE}: {e}"
-            self.actualizar_status(mensagem_erro) # Use a função corrigida
+            self.atualizar_status(mensagem_erro) # Use a função corrigida
             logger.error(mensagem_erro, exc_info=True)
 
 
@@ -311,22 +311,22 @@ class WidevoiceDownloaderGUI:
         try:
             url_api = construir_url_api(url_base, login, token)
             # Passe a função de status corrigida
-            dados_chamadas = obter_dados_chamadas(url_api, datainicio_str, datafim_str, status_callback=self.actualizar_status)
+            dados_chamadas = obter_dados_completos(url_api, datainicio_str, datafim_str, status_callback=self.atualizar_status)
 
             if dados_chamadas is None:
-                self.actualizar_status("Falha ao obter dados da API. Verifique logs para mais detalhes.") # Use a função corrigida
+                self.atualizar_status("Falha ao obter dados da API. Verifique logs para mais detalhes.") # Use a função corrigida
                 logger.error("Falha ao obter dados da API.")
                 self.atualizar_progresso(0)
                 return
 
             if not isinstance(dados_chamadas, list) or not dados_chamadas:
-                self.actualizar_status("Nenhum resultado encontrado ou resposta da API em formato inesperado.") # Use a função corrigida
+                self.atualizar_status("Nenhum resultado encontrado ou resposta da API em formato inesperado.") # Use a função corrigida
                 logger.info("Nenhum resultado encontrado ou resposta da API em formato inesperado.")
                 self.atualizar_progresso(100)
                 return
 
             total_chamadas = len(dados_chamadas)
-            self.actualizar_status(f"\nEncontrados {total_chamadas} registros de chamadas.") # Use a função corrigida
+            self.atualizar_status(f"\nEncontrados {total_chamadas} registros de chamadas.") # Use a função corrigida
             logger.info(f"Encontrados {total_chamadas} registros de chamadas.")
 
             self.progress_bar['maximum'] = total_chamadas
@@ -343,11 +343,11 @@ class WidevoiceDownloaderGUI:
                 for chamada in dados_chamadas:
                      if 'gravacao' in chamada and chamada['gravacao']:
                           # Passe a função de status corrigida
-                          future = executor.submit(baixar_gravacao, url_base, chamada, diretorio_destino, self.actualizar_status)
+                          future = executor.submit(baixar_gravacao, url_base, chamada, diretorio_destino, self.atualizar_status)
                           future_to_chamada[future] = chamada
                      else:
                           # Passe a função de status corrigida
-                          future = executor.submit(self._processar_sem_gravacao, chamada, self.actualizar_status)
+                          future = executor.submit(self._processar_sem_gravacao, chamada, self.atualizar_status)
                           future_to_chamada[future] = chamada
 
 
@@ -363,7 +363,7 @@ class WidevoiceDownloaderGUI:
                     except Exception as exc:
                         chamada_id = chamada_original.get('id', 'desconhecido')
                         mensagem_erro = f"Ocorreu uma exceção ao processar a chamada ID {chamada_id}: {exc}"
-                        self.actualizar_status(mensagem_erro) # Use a função corrigida
+                        self.atualizar_status(mensagem_erro) # Use a função corrigida
                         logger.exception(mensagem_erro)
 
 
@@ -386,11 +386,11 @@ class WidevoiceDownloaderGUI:
                           erros_download_count += 1
 
 
-            self.actualizar_status("\n--- Processo Finalizado ---") # Use a função corrigida
-            self.actualizar_status(f"Gravações baixadas com sucesso: {gravacoes_baixadas_count}") # Use a função corrigida
+            self.atualizar_status("\n--- Processo Finalizado ---") # Use a função corrigida
+            self.atualizar_status(f"Gravações baixadas com sucesso: {gravacoes_baixadas_count}") # Use a função corrigida
             if erros_download_count > 0:
-                self.actualizar_status(f"Erros durante o download: {erros_download_count}") # Use a função corrigida
-                self.actualizar_status("Verifique as mensagens de erro acima para detalhes.") # Use a função corrigida
+                self.atualizar_status(f"Erros durante o download: {erros_download_count}") # Use a função corrigida
+                self.atualizar_status("Verifique as mensagens de erro acima para detalhes.") # Use a função corrigida
                 logger.warning(f"Processo finalizado com {erros_download_count} erros de download.")
             else:
                  logger.info("Processo finalizado com sucesso.")
@@ -401,7 +401,7 @@ class WidevoiceDownloaderGUI:
 
         except Exception as e:
             mensagem_erro_inesperado = f"Ocorreu um erro inesperado durante o processamento principal: {e}"
-            self.actualizar_status(mensagem_erro_inesperado) # Use a função corrigida
+            self.atualizar_status(mensagem_erro_inesperado) # Use a função corrigida
             logger.exception(mensagem_erro_inesperado)
 
 
@@ -449,7 +449,7 @@ class WidevoiceDownloaderGUI:
         except json.JSONDecodeError as e:
              # Se o arquivo existir mas for inválido, logue e limpe/resete os campos relevantes
              mensagem_erro = f"Erro ao decodificar o arquivo de configurações {CONFIG_FILE}: {e}. Verifique o formato do arquivo."
-             self.actualizar_status(mensagem_erro) # Tente exibir o erro na GUI
+             self.atualizar_status(mensagem_erro) # Tente exibir o erro na GUI
              logger.error(mensagem_erro, exc_info=True)
              # Limpe os campos para evitar carregar dados parciais ou incorretos
              self.url_entry.delete(0, tk.END)
@@ -460,7 +460,7 @@ class WidevoiceDownloaderGUI:
         except Exception as e:
             # Captura qualquer outro erro inesperado durante o carregamento
             mensagem_erro = f"Ocorreu um erro inesperado ao carregar configurações de {CONFIG_FILE}: {e}"
-            self.actualizar_status(mensagem_erro) # Tente exibir o erro na GUI
+            self.atualizar_status(mensagem_erro) # Tente exibir o erro na GUI
             logger.error(mensagem_erro, exc_info=True)
             # Considere limpar os campos aqui também, dependendo da gravidade do erro
             self.url_entry.delete(0, tk.END)

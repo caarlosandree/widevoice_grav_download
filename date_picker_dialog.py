@@ -9,47 +9,6 @@ from tkinter import Toplevel # Para usar a janela Toplevel padrão com widgets t
 import calendar
 from datetime import datetime, timedelta
 
-# Opção 1: Usar o DatePickerDialog pronto do ttkbootstrap (mais simples e recomendado)
-# class DatePickerDialog(ttk.DatePickerDialog):
-#     def __init__(self, parent, target_entry, initial_date=None):
-#         super().__init__(parent, initialdate=initial_date)
-#         self.target_entry = target_entry
-#         self.parent = parent
-#         self.transient(parent)
-#         self.grab_set()
-#
-#         # O DatePickerDialog do ttkbootstrap tem um método para retornar a data selecionada
-#         # Precisamos adaptar para atualizar o self.target_entry
-#         self.date_selected = None
-#         self.protocol("WM_DELETE_WINDOW", self._on_close)
-#
-#     def _on_close(self):
-#         # Obtém a data selecionada (se houver) e atualiza o campo
-#         selected_date = self.get_date()
-#         if selected_date:
-#             # Mantém a hora atual do campo de entrada se ela existir
-#             current_time_str = ""
-#             current_value = self.target_entry.get()
-#             if " " in current_value:
-#                 time_part = current_value.split(" ")[1]
-#                 try:
-#                      datetime.strptime(time_part, '%H:%M:%S') # Valida o formato da hora
-#                      current_time_str = f" {time_part}"
-#                 except ValueError:
-#                      current_time_str = " 00:00:00" # Usa hora padrão se a hora no campo for inválvida
-#             else:
-#                  current_time_str = " 00:00:00" # Usa hora padrão se não houver hora no campo
-#
-#             formatted_date = selected_date.strftime('%Y-%m-%d') + current_time_str
-#             self.target_entry.delete(0, tk.END) # Use tk.END ou ttk.END
-#             self.target_entry.insert(0, formatted_date)
-#
-#         self.parent.grab_release()
-#         self.destroy()
-
-
-# Opção 2: Adaptar sua implementação existente para usar ttkbootstrap (requer mais mudanças internas)
-# Mantenha a estrutura da sua classe, mas use widgets ttkbootstrap e Toplevel padrão para evitar conflitos
 class DatePickerDialog(Toplevel): # Use Toplevel padrão
     def __init__(self, parent, target_entry, initial_date=None):
         super().__init__(parent)
