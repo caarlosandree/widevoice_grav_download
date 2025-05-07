@@ -1,33 +1,56 @@
 # Widevoice Downloader GUI
 
-Este é um aplicativo de interface gráfica (GUI) desenvolvido em Python utilizando `tkinter` e `ttkbootstrap` para baixar gravações de chamadas da API Widevoice. O objetivo é fornecer uma ferramenta amigável para interagir com a API, selecionar períodos específicos para download e organizar os arquivos baixados localmente.
+Este é um aplicativo com interface gráfica para baixar gravações e metadados de chamadas de uma API Widevoice. Ele permite configurar credenciais de acesso, selecionar um período e um diretório de destino, e gerenciar o processo de download, incluindo opções para tratamento de metadados e funcionalidade de cancelamento.
 
-## Novidades e Melhorias
+## Funcionalidades
 
-Esta versão traz atualizações significativas focadas em melhorar a usabilidade, a robustez e o desempenho do downloader:
-
-* **Interface Gráfica Moderna (ttkbootstrap)**: A GUI foi revitalizada com a integração da biblioteca `ttkbootstrap`, oferecendo um visual mais polido e moderno em comparação com o `tkinter` padrão.
-* **Seleção de Data Conveniente**: Incluído um `DatePickerDialog` para permitir que o usuário selecione facilmente as datas de início e fim do período de busca através de um calendário interativo, garantindo a inserção no formato correto.
-* **Obtenção Completa de Dados da API**: A lógica de comunicação com a API (`api_handler.py`) foi aprimorada para superar o limite comum de 500 registros por requisição. Agora, o aplicativo realiza múltiplas chamadas incrementais com base na data e hora para obter todos os dados disponíveis no intervalo especificado.
-* **Download de Gravações com Retentativas**: O módulo responsável pelo download dos arquivos de gravação (`recording_downloader.py`) agora inclui um mecanismo robusto de retentativas. Em caso de falhas temporárias de rede ou servidor, o download será automaticamente tentado novamente, aumentando a taxa de sucesso.
-* **Geração Abrangente de Metadados**: Para cada registro de chamada obtido da API, um arquivo de texto (`.txt`) contendo todos os metadados relevantes é gerado. Isso acontece mesmo para chamadas que não possuem um arquivo de gravação associado, garantindo que as informações da chamada sejam preservadas.
-* **Download Paralelo de Gravações**: A performance do download foi otimizada com a implementação de processamento paralelo utilizando `concurrent.futures.ThreadPoolExecutor`. Isso permite que múltiplos arquivos de gravação sejam baixados simultaneamente, reduzindo consideravelmente o tempo total necessário para baixar grandes volumes de gravações.
-* **Persistência de Configurações (incluindo Token)**: As configurações essenciais como URL do servidor, login, token de acesso e o diretório de destino são salvas em um arquivo `config.json` após a primeira execução e carregadas automaticamente nas execuções subsequentes. Isso evita a necessidade de reinserir essas informações a cada vez.
-* **Sistema de Logging Aprimorado**: Um sistema de logging mais detalhado foi configurado (`main.py`, `api_handler.py`, `gui_app.py`, `recording_downloader.py`). Todas as operações importantes, avisos e erros são registrados em um arquivo de log (`logs/widevoice_downloader.log`), facilitando a identificação e resolução de problemas.
-* **Tratamento Específico para Chamadas Sem Gravação**: O aplicativo agora lida explicitamente com registros de chamadas que não possuem um link de gravação. Ele informa o usuário sobre essas chamadas e garante que o arquivo de metadado correspondente seja gerado.
+* **Interface Gráfica Moderna:** Utiliza `ttkbootstrap` para uma aparência moderna e responsiva.
+* **Configurações de Acesso:** Permite inserir a URL do servidor Widevoice, login e token de acesso à API.
+* **Seleção de Período:** Interface intuitiva para selecionar as datas de início e fim para buscar as chamadas.
+* **Diretório de Destino Customizável:** Escolha facilmente o diretório onde as gravações e metadados serão salvos.
+* **Download Paralelo:** Baixa múltiplas gravações simultaneamente para otimizar o tempo. (Configurável via `MAX_WORKERS` em `download_controller.py`)
+* **Gerenciamento de Metadados Flexível:**
+    * Opção para baixar arquivos de metadado (`.txt`) junto com as gravações correspondentes.
+    * Opção para gerar arquivos de metadado (`.txt`) *apenas* para chamadas que não possuem gravação associada, salvando-os em uma pasta separada (`Metadata_Only`) para facilitar a identificação.
+* **Retentativas de Download:** Tenta baixar gravações falhas várias vezes antes de desistir. (Configurável via `MAX_RETRIES` e `RETRY_DELAY` em `recording_downloader.py`)
+* **Cancelamento do Processo:** Botão dedicado para cancelar o processo de download a qualquer momento.
+* **Status e Progresso em Tempo Real:** Exibe mensagens de status detalhadas e atualiza uma barra de progresso na interface.
+* **Log de Atividades:** Registra o processo, erros e avisos em um arquivo de log (`logs/widevoice_downloader.log`) e no console.
+* **Persistência de Configurações:** Salva automaticamente (se o usuário clicar em "Salvar Configurações") as credenciais, datas, diretório e opções de metadado inseridas em um arquivo (`config.json`) para uso futuro.
+* **Ofuscação de Token:** O token de acesso é ofuscado usando Base64 no arquivo de configuração para maior segurança (não é criptografia forte, apenas ofuscação básica).
+* **Tratamento de Erros Robustos:** Lida com falhas na comunicação com a API, erros de download e outros problemas, reportando-os ao usuário e no log.
+* **Organização de Arquivos:** Salva gravações e metadados em subpastas organizadas por Ano/Mês/Dia no diretório de destino escolhido.
 
 ## Como Usar
 
-1.  **Instalação**: Clone o repositório ou baixe os arquivos do projeto.
-2.  **Configuração**: Execute o script principal (`main.py`). Na interface gráfica:
-    * Preencha o campo "URL do Servidor" com o endereço base da sua API Widevoice.
-    * Insira seu "Login" e "Token" de acesso à API.
-    * Defina as datas de "Data Início" e "Data Fim" para o período desejado. Você pode digitar manualmente no formato `YYYY-MM-DD HH:mm:ss` ou usar o botão "..." para abrir o seletor de data.
-    * Escolha o "Diretório de Salvamento" onde os arquivos serão salvos. Use o botão "Procurar" para selecionar uma pasta.
-3.  **Salvar Configurações**: Clique no botão "Salvar Configurações" para armazenar as informações preenchidas (incluindo o token) no arquivo `config.json`. Isso evitará que você precise digitá-las novamente no futuro.
-4.  **Iniciar Download**: Clique no botão "Iniciar Download". O aplicativo começará a obter a lista de chamadas do período especificado e a baixar as gravações e metadados correspondentes.
-5.  **Acompanhamento**: A área de "Status" exibirá o progresso em tempo real, incluindo informações sobre as chamadas processadas, downloads bem-sucedidos, erros e avisos. A barra de progresso indicará o percentual de chamadas processadas.
+1.  **Instalação:**
+    * Certifique-se de ter Python instalado (versão 3.6+ recomendada).
+    * Instale as dependências necessárias:
+        ```bash
+        pip install requests ttkbootstrap
+        ```
 
-## Estrutura de Arquivos Salvos
+2.  **Execução:**
+    * Execute o script principal:
+        ```bash
+        python main.py
+        ```
 
-Os arquivos baixados (gravações `.gsm` e metadados `.txt`) são organizados em subpastas dentro do diretório de destino selecionado, seguindo a estrutura:
+3.  **Interface do Usuário:**
+    * Preencha os campos **URL do Servidor**, **Login** e **Token** com suas credenciais de acesso à API Widevoice.
+    * Utilize os seletores de data ou digite as datas nos campos **Data Início** e **Data Fim** no formato `YYYY-MM-DD`.
+    * Selecione o **Diretório de Salvamento** clicando no botão "Procurar". O diretório padrão é `Documentos/Gravacoes_Widevoice` na sua pasta de usuário.
+    * Marque ou desmarque as opções em **Opções de Download** conforme sua preferência para o gerenciamento de metadados:
+        * `Baixar Metadados (Com Gravação)`: Se marcada, gera um arquivo `.txt` com os detalhes da chamada para cada gravação baixada com sucesso ou que falhou o download.
+        * `Baixar Metadados (Sem Gravação)`: Se marcada, gera um arquivo `.txt` com os detalhes da chamada *apenas* para os registros da API que não possuem um arquivo de gravação associado, salvando-os na pasta `Metadata_Only`.
+    * Clique em **"Salvar Configurações"** para persistir as configurações atuais no arquivo `config.json`. Elas serão carregadas automaticamente na próxima vez que você abrir o aplicativo.
+    * Clique em **"Iniciar Download"** para começar o processo.
+    * Acompanhe o status e o progresso na área de texto e na barra de progresso.
+    * Clique em **"Cancelar Download"** (botão que aparece durante o download) para interromper o processo.
+
+4.  **Visualizando Logs:**
+    * Detalhes sobre o processo, avisos e erros são registrados no arquivo `logs/widevoice_downloader.log` (criado na pasta `logs` no mesmo diretório do executável/script).
+
+## Configuração Adicional (Opcional)
+
+* Você pode modificar as constantes em `config.py`, `download_controller.py` (MAX_WORKERS) e `recording_downloader.py` (MAX_RETRIES, RETRY_DELAY) para ajustar o comportamento do aplicativo.
