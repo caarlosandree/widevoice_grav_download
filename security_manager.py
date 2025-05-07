@@ -1,8 +1,9 @@
+# security_manager.py
 import json
 import os
 import base64
 import logging
-import binascii # Importe binascii para capturar erros de base64 inválido
+import binascii
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +17,8 @@ def _obfuscate_token(token):
         encoded_bytes = base64.b64encode(token.encode('utf-8'))
         return encoded_bytes.decode('utf-8')
     except Exception as e:
-        # Mantém o log existente para outros tipos de erro
         logger.error(f"Erro inesperado ao obfuscate o token: {e}", exc_info=True)
-        return token # Retorna o token original em caso de erro (menos seguro, mas evita quebrar)
+        return token
 
 def _deobfuscate_token(obfuscated_token):
     """
@@ -28,40 +28,37 @@ def _deobfuscate_token(obfuscated_token):
     if not obfuscated_token:
         return ""
     try:
-        # Tenta decodificar de Base64 e depois para UTF-8
         decoded_bytes = base64.b64decode(obfuscated_token.encode('utf-8'))
         return decoded_bytes.decode('utf-8')
     except (UnicodeDecodeError, binascii.Error) as e:
-        # Captura erros específicos de decodificação (UTF-8 inválido ou Base64 inválido)
-        logger.warning(f"Falha ao deobfuscate o token (formato inválido?): {e}. O token será usado como está (pode ser texto puro ou inválido).")
-        return obfuscated_token # Retorna a string original que falhou na decodificação
+         logger.warning(f"Erro ao decodificar token Base64: {e}. Token pode ser inválido ou não foi codificado em Base64. Retornando token original.", exc_info=True)
+         return obfuscated_token
     except Exception as e:
-        # Captura outros erros inesperados durante a deobfuscação
         logger.error(f"Erro inesperado ao deobfuscate o token: {e}", exc_info=True)
-        return obfuscated_token # Retorna a string original em caso de erro
+        return obfuscated_token
 
-
-# ... restante das funções load_configuration e save_configuration (mantêm-se as mesmas) ...
-# Coloque as funções load_configuration e save_configuration após as funções _obfuscate_token e _deobfuscate_token
-# para garantir que sejam encontradas.
 
 def load_configuration():
     """
-    Carrega as configurações de um arquivo JSON, deobfuscando o token.
-    Retorna um dicionário com as configurações ou None em caso de erro/arquivo inexistente.
+    Carrega as configurações de um arquivo JSON, deobfuscando o token e incluindo as opções de metadado.
+    Retorna um dicionário com as configurações ou None se o arquivo não for encontrado ou houver erro.
     """
-    # Usa CONFIG_FILE definido neste módulo
     if not os.path.exists(CONFIG_FILE):
-        logger.info(f"Arquivo de configuração {CONFIG_FILE} não encontrado.")
+        logger.info(f"Arquivo de configurações não encontrado: {CONFIG_FILE}")
         return None
 
     try:
         with open(CONFIG_FILE, 'r') as f:
             config_data = json.load(f)
 
-        # Deobfusca o token ao carregar usando a função modificada
         if "token" in config_data:
             config_data["token"] = _deobfuscate_token(config_data["token"])
+
+        # --- Carregar as novas opções de metadado ---
+        # Usa .get(key, default_value) para compatibilidade com arquivos antigos
+        config_data["download_metadata_with_recording"] = config_data.get("download_metadata_with_recording", True) # Default é True
+        config_data["download_metadata_without_recording"] = config_data.get("download_metadata_without_recording", True) # Default é True
+        # --- Fim do carregamento das novas opções ---
 
         logger.info(f"Configurações carregadas de {CONFIG_FILE}.")
         return config_data
@@ -77,21 +74,24 @@ def load_configuration():
 
 def save_configuration(config_data):
     """
-    Salva as configurações em um arquivo JSON, obfuscando o token.
+    Salva as configurações em um arquivo JSON, obfuscando o token e incluindo as opções de metadado.
     config_data deve ser um dicionário com as configurações.
+    Retorna True em sucesso, False em falha.
     """
-    config_data_to_save = config_data.copy() # Crie uma cópia para não modificar o dicionário original
+    config_data_to_save = config_data.copy()
 
-    # Obfusca o token antes de salvar usando a função
     if "token" in config_data_to_save:
         config_data_to_save["token"] = _obfuscate_token(config_data_to_save["token"])
 
-    # Usa CONFIG_FILE definido neste módulo
+    # As opções 'download_metadata_with_recording' e 'download_metadata_without_recording' já devem estar no dicionário passado pela GUI
+
     try:
         with open(CONFIG_FILE, 'w') as f:
             json.dump(config_data_to_save, f, indent=4)
+
         logger.info(f"Configurações salvas em {CONFIG_FILE}.")
         return True
+
     except Exception as e:
-        logger.error(f"Erro ao salvar configurações em {CONFIG_FILE}: {e}", exc_info=True)
+        logger.error(f"Ocorreu um erro inesperado ao salvar configurações em {CONFIG_FILE}: {e}", exc_info=True)
         return False

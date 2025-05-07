@@ -1,28 +1,23 @@
+# gui_app.py
 import tkinter as tk
 
 import ttkbootstrap as ttk
 from ttkbootstrap.widgets import DateEntry
 import tkinter.filedialog as filedialog
 from tkinter import scrolledtext
+import tkinter.messagebox as messagebox
 
-import threading # Ainda necessário para a thread principal que chama o controlador
+import threading
 from datetime import datetime
 import os
 import logging
-# Removido import concurrent.futures pois o executor está no DownloadController
-# import concurrent.futures
 
-# Importa os módulos necessários
 import security_manager
 import config
-# Importa o novo controlador de download
 from download_controller import DownloadController
 
-# Remove definição de MAX_WORKERS pois está no DownloadController
-# MAX_WORKERS = 5
 
 logger = logging.getLogger(__name__)
-
 
 class WidevoiceDownloaderGUI:
     def __init__(self, master):
@@ -83,144 +78,223 @@ class WidevoiceDownloaderGUI:
 
         self.frame_destino.columnconfigure(1, weight=1)
 
+        # --- Frame para Opções de Download (Agora com dois checkboxes) ---
+        self.frame_opcoes = ttk.LabelFrame(master, text="Opções de Download")
+        self.frame_opcoes.grid(row=2, column=0, padx=10, pady=5, sticky="ew")
+        self.frame_opcoes.columnconfigure(0, weight=1)
+
+        # Checkbox para Metadados COM gravação
+        self.download_metadata_with_recording_var = tk.BooleanVar(value=True)
+        self.download_metadata_with_recording_checkbox = ttk.Checkbutton(
+            self.frame_opcoes,
+            text="Baixar Metadados (Com Gravação)",
+            variable=self.download_metadata_with_recording_var,
+            bootstyle="round-toggle"
+        )
+        self.download_metadata_with_recording_checkbox.grid(row=0, column=0, padx=5, pady=2, sticky="w")
+
+        # Checkbox para Metadados SEM gravação
+        self.download_metadata_without_recording_var = tk.BooleanVar(value=True)
+        self.download_metadata_without_recording_checkbox = ttk.Checkbutton(
+            self.frame_opcoes,
+            text="Baixar Metadados (Sem Gravação)",
+            variable=self.download_metadata_without_recording_var,
+            bootstyle="round-toggle"
+        )
+        self.download_metadata_without_recording_checkbox.grid(row=1, column=0, padx=5, pady=2, sticky="w")
+        # --- Fim do Frame para Opções de Download ---
+
+
         self.frame_botoes_acao = ttk.Frame(master)
-        self.frame_botoes_acao.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
+        self.frame_botoes_acao.grid(row=3, column=0, padx=10, pady=10, sticky="ew")
         self.frame_botoes_acao.columnconfigure(0, weight=1)
         self.frame_botoes_acao.columnconfigure(1, weight=0)
         self.frame_botoes_acao.columnconfigure(2, weight=0)
 
+
+        self.progress_text_label = ttk.Label(self.frame_botoes_acao, text="Progresso: 0/0")
+        self.progress_text_label.grid(row=0, column=0, padx=5, pady=2, sticky="w")
+
+
         self.progress_bar = ttk.Progressbar(self.frame_botoes_acao, orient="horizontal", length=400, mode="determinate")
-        self.progress_bar.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
+        self.progress_bar.grid(row=1, column=0, padx=5, pady=5, sticky="ew", columnspan=1)
+
 
         self.save_button = ttk.Button(self.frame_botoes_acao, text="Salvar Configurações", command=self.salvar_configuracoes_button_click)
-        self.save_button.grid(row=0, column=1, padx=5, pady=5)
+        self.save_button.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+
 
         self.download_button = ttk.Button(self.frame_botoes_acao, text="Iniciar Download", command=self.iniciar_download)
-        self.download_button.grid(row=0, column=2, padx=5, pady=5)
+
+        self.cancel_button = ttk.Button(self.frame_botoes_acao, text="Cancelar Download", command=self.cancel_download, state=tk.DISABLED, bootstyle="danger")
+
 
         # Área de Status/Log da GUI
         self.status_label = ttk.Label(master, text="Status:")
-        self.status_label.grid(row=3, column=0, padx=10, pady=2, sticky="w")
+        self.status_label.grid(row=4, column=0, padx=10, pady=2, sticky="w")
         self.status_text = scrolledtext.ScrolledText(master, wrap=ttk.WORD, width=80, height=15)
-        self.status_text.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
+        self.status_text.grid(row=5, column=0, padx=10, pady=10, sticky="nsew")
 
         # --- Configurar Tags para Status ---
-        self.status_text.tag_configure('info', foreground='black')  # Cor padrão para informações
-        self.status_text.tag_configure('warning', foreground='orange')  # Cor para avisos
-        self.status_text.tag_configure('error', foreground='red')  # Cor para erros
-        # Você pode adicionar outros estilos aqui, como negrito, etc.
-        # Exemplo: self.status_text.tag_configure('error', foreground='red', font=('Arial', 9, 'bold'))
+        self.status_text.tag_configure('info', foreground='black')
+        self.status_text.tag_configure('warning', foreground='orange')
+        self.status_text.tag_configure('error', foreground='red')
+        self.status_text.tag_configure('cancelled', foreground='blue')
+        self.status_text.tag_configure('debug', foreground='gray')
+
 
         # Configurações para redimensionamento da janela principal
         master.columnconfigure(0, weight=1)
-        master.rowconfigure(4, weight=1)
+        master.rowconfigure(5, weight=1)
 
-        # Configurações para redimensionamento da janela principal
-        master.columnconfigure(0, weight=1)
-        master.rowconfigure(4, weight=1)
+        # Flag e Evento de Cancelamento
+        self._cancel_event = threading.Event()
+
 
         # Cria uma instância do DownloadController, passando os callbacks da GUI
         self.download_controller = DownloadController(
             status_callback=self.atualizar_status,
             progress_callback=self.atualizar_progresso,
-            completion_callback=self._process_download_completed, # Novo callback de conclusão
-            directory_getter=self._get_download_directory # Callback para obter o diretório
+            completion_callback=self._process_download_completed,
+            directory_getter=self._get_download_directory,
+            progress_maximum_callback=self.atualizar_progresso_maximo
         )
 
 
         # Carregar configurações ao iniciar
         self.carregar_configuracoes()
 
+        # Garantir que o botão "Iniciar Download" esteja visível ao iniciar
+        self._hide_cancel_button()
 
-    # --- Métodos Auxiliares para Gerenciar Botões (seguro para thread - chamados via after) ---
-    # Estes métodos são agora callbacks para o DownloadController
-    def _enable_download_button(self):
-        """Habilita o botão de download na thread principal."""
-        logger.info("GUI: Habilitando botão 'Iniciar Download'.")
-        try:
-            self.download_button.config(state=tk.NORMAL)
-        except Exception as e:
-            logger.error(f"GUI: Erro ao habilitar botão 'Iniciar Download': {e}")
 
-    def _enable_save_button(self):
-        """Habilita o botão de salvar na thread principal."""
-        logger.info("GUI: Habilitando botão 'Salvar Configurações'.")
+    # --- Métodos Auxiliares para Gerenciar Botões e Estado (seguro para thread - chamados via after) ---
+
+    def _set_button_state(self, button, state):
+        """Método interno para configurar o estado de um botão na thread principal."""
         try:
-            self.save_button.config(state=tk.NORMAL)
+            button.config(state=state)
         except Exception as e:
-            logger.error(f"GUI: Erro ao habilitar botão 'Salvar Configurações': {e}")
+            logger.error(f"GUI: Erro ao configurar estado do botão {button.cget('text')}: {e}")
 
     def _process_download_completed(self):
-         """Callback chamado pelo DownloadController quando o processo termina."""
+         """Callback chamado pelo DownloadController quando o processo termina (sucesso, falha ou cancelamento)."""
          logger.info("GUI: Callback de conclusão do processo de download recebido.")
-         # Agenda a reabilitação dos botões na thread principal
-         self.master.after(0, self._enable_download_button)
+         self._cancel_event.clear()
+         self.master.after(0, self._enable_start_button)
          self.master.after(0, self._enable_save_button)
+         self.master.after(0, self._hide_cancel_button)
          logger.info("GUI: Reabilitação de botões agendada.")
 
 
+    def _enable_start_button(self):
+        """Habilita o botão de download na thread principal."""
+        self._set_button_state(self.download_button, tk.NORMAL)
+
+    def _enable_save_button(self):
+        """Habilita o botão de salvar na thread principal."""
+        self._set_button_state(self.save_button, tk.NORMAL)
+
+    def _disable_start_button(self):
+         """Desabilita o botão de download na thread principal."""
+         self._set_button_state(self.download_button, tk.DISABLED)
+
+    def _disable_save_button(self):
+         """Desabilita o botão de salvar na thread principal."""
+         self._set_button_state(self.save_button, tk.DISABLED)
+
+    def _show_cancel_button(self):
+         """Mostra o botão de cancelar e esconde o de iniciar na thread principal."""
+         self._set_button_state(self.cancel_button, tk.NORMAL)
+         self.download_button.grid_forget()
+         self.cancel_button.grid(row=0, column=2, padx=5, pady=5, sticky="e")
+
+    def _hide_cancel_button(self):
+         """Esconde o botão de cancelar e mostra o de iniciar na thread principal."""
+         self._set_button_state(self.cancel_button, tk.DISABLED)
+         self.cancel_button.grid_forget()
+         self.download_button.grid(row=0, column=2, padx=5, pady=5, sticky="e")
+
+
     # --- Métodos Auxiliares para Atualizar GUI (seguro para thread - chamados via after) ---
-    # Estes métodos são agora callbacks para o DownloadController
+
     def atualizar_status(self, mensagem, level=logging.INFO):
         """
         Atualiza a área de texto de status (seguro para chamar de qualquer thread).
         Mapeia o nível de log para uma tag de formatação.
         """
-        # Mapeia o nível de log para o nome da tag
-        tag = 'info'  # Tag padrão
+        tag = 'info'
         if level == logging.WARNING:
             tag = 'warning'
         elif level == logging.ERROR:
             tag = 'error'
-        # Adicione outros mapeamentos conforme necessário
+        elif level == logging.INFO and ("Cancelamento solicitado" in mensagem or "Processo de download cancelado" in mensagem):
+             tag = 'cancelled'
+        elif level == logging.DEBUG:
+             tag = 'debug'
+
 
         try:
-            # Usa after(0, ...) para agendar a execução na thread principal, passando a tag
             self.master.after(0, self._inserir_status, mensagem, tag)
         except Exception as e:
             logger.error(f"GUI: Erro ao agendar atualização de status: {e} - Mensagem: {mensagem}, Nível: {level}",
                          exc_info=True)
 
-    # O metodo _inserir_status foi modificado para aceitar 'tag'.
-    # def _inserir_status(self, mensagem, tag=None): ...
-
     def _inserir_status(self, mensagem, tag=None):
         """
-        Metodo interno para inserir texto no widget de status e logar.
-        Aceita um argumento 'tag' para aplicar formatação.
+        Metodo interno para inserir texto no widget de status.
         """
         try:
-            # Insere a mensagem e a quebra de linha
-            self.status_text.insert(tk.END, mensagem + "\n", tag)  # Aplica a tag aqui
-            self.status_text.see(tk.END)  # Rola para ver a última mensagem
-            # Logging da mensagem de status já acontece dentro do _log_and_status do controlador ou aqui se for chamado diretamente
-            # logger.info(f"STATUS GUI: {mensagem}") # Evita logar a mesma mensagem duas vezes se vindo do controlador
+            self.status_text.insert(tk.END, mensagem + "\n", tag)
+            self.status_text.see(tk.END)
         except Exception as e:
             logger.error(f"GUI: Erro ao inserir status na GUI: {e} - Mensagem: {mensagem}", exc_info=True)
 
-    # O metodo atualizar_status precisará ser ajustado para passar a tag/nível
-    # Faremos isso depois de definir as tags na GUI e ajustar o controlador.
 
-
-    def atualizar_progresso(self, valor):
-         """Atualiza o valor da barra de progresso (seguro para chamar de qualquer thread)."""
+    def atualizar_progresso(self, valor, total=None):
+         """
+         Atualiza o valor da barra de progresso e o texto de progresso.
+         'valor' é o número de itens processados.
+         'total' é o número total de itens (opcional, para texto).
+         (seguro para chamar de qualquer thread).
+         """
          try:
-            # Usa after(0, ...) para agendar a execução na thread principal
-            self.master.after(0, self._configurar_progresso, valor)
+            self.master.after(0, self._configurar_progresso, valor, total)
          except Exception as e:
-             logger.error(f"GUI: Erro ao agendar atualização de progresso: {e} - Valor: {valor}")
+             logger.error(f"GUI: Erro ao agendar atualização de progresso: {e} - Valor: {valor}, Total: {total}", exc_info=True)
 
 
-    def _configurar_progresso(self, valor):
-         """Método interno para configurar o valor da barra de progresso."""
+    def _configurar_progresso(self, valor, total=None):
+         """Método interno para configurar a barra e o texto de progresso."""
          try:
              self.progress_bar['value'] = valor
-         except Exception as e:
-             logger.error(f"GUI: Erro ao configurar barra de progresso: {e} - Valor: {valor}")
 
-    # Nota: A atualização do valor máximo da barra de progresso ainda precisa ser feita na GUI,
-    # pois é um widget da GUI. A GUI receberá o total_chamadas do controlador
-    # e agendará essa atualização na thread principal. Vamos ajustar iniciar_download para isso.
+             if total is not None:
+                  self.progress_text_label.config(text=f"Progresso: {valor}/{total}")
+             else:
+                  current_max = self.progress_bar['maximum'] if self.progress_bar['maximum'] > 0 else 0
+                  self.progress_text_label.config(text=f"Progresso: {valor}/{int(current_max)}")
+
+
+         except Exception as e:
+             logger.error(f"GUI: Erro ao configurar barra/texto de progresso: {e} - Valor: {valor}, Total: {total}", exc_info=True)
+
+
+    def atualizar_progresso_maximo(self, maximum):
+         """Define o valor máximo para a barra de progresso (seguro para thread)."""
+         try:
+              self.master.after(0, self._configurar_progresso_maximo, maximum)
+         except Exception as e:
+              logger.error(f"GUI: Erro ao agendar configuração de progresso máximo: {e} - Máximo: {maximum}", exc_info=True)
+
+    def _configurar_progresso_maximo(self, maximum):
+         """Método interno para configurar o valor máximo da barra de progresso."""
+         try:
+             self.progress_bar['maximum'] = maximum
+             current_value = self.progress_bar['value']
+             self.progress_text_label.config(text=f"Progresso: {current_value}/{maximum}")
+         except Exception as e:
+             logger.error(f"GUI: Erro ao configurar máximo da barra de progresso: {e} - Máximo: {maximum}", exc_info=True)
 
 
     # --- Métodos de Interação da GUI ---
@@ -243,67 +317,65 @@ class WidevoiceDownloaderGUI:
         """
         Coleta dados da GUI, valida e passa a solicitação de download para o DownloadController.
         """
-        # Desabilita botões durante o processo
-        self.download_button.config(state=tk.DISABLED)
-        self.save_button.config(state=tk.DISABLED)
+        self._disable_start_button()
+        self._disable_save_button()
+        self._show_cancel_button()
         self.atualizar_status("GUI: Coletando dados e validando para iniciar download...")
         logger.info("GUI: Botão 'Iniciar Download' clicado. Coletando dados.")
 
-        # Limpa status e progresso para um novo download
         try:
             self.status_text.delete(1.0, tk.END)
-            self.atualizar_progresso(0)
-            self.progress_bar['maximum'] = 100 # Reseta o máximo inicialmente
+            self.atualizar_progresso(0, 0)
+            self.progress_bar['maximum'] = 100
         except Exception as e:
-             logger.error(f"GUI: Erro ao limpar status ou progresso antes de iniciar download: {e}")
+             logger.error(f"GUI: Erro ao limpar status ou progresso antes de iniciar download: {e}", exc_info=True)
 
 
-        # Coleta os dados da GUI
         url_base = self.url_entry.get().strip()
         login = self.login_entry.get().strip()
-        token = self.token_entry.get().strip() # Pega o token diretamente da GUI (já deobfuscado ao carregar)
+        token = self.token_entry.get().strip()
 
-        # Obtém apenas a data dos DateEntry e adiciona a hora padrão
         datainicio_date_str = self.datainicio_entry.entry.get().strip()
         datafim_date_str = self.datafim_entry.entry.get().strip()
 
-        # Adiciona a parte da hora para formar a string completa no formato esperado pela API
         datainicio_str = f"{datainicio_date_str} 00:00:00" if datainicio_date_str else ""
         datafim_str = f"{datafim_date_str} 23:59:59" if datafim_date_str else ""
 
-        # Não precisamos coletar o diretorio_destino aqui diretamente,
-        # o DownloadController irá obtê-lo via self._get_download_directory()
+        # --- Obter o estado dos checkboxes de metadado ---
+        download_metadata_with_recording = self.download_metadata_with_recording_var.get()
+        download_metadata_without_recording = self.download_metadata_without_recording_var.get()
+        logger.info(f"GUI: Opção 'Baixar Metadados (Com Gravação)' selecionada: {download_metadata_with_recording}")
+        logger.info(f"GUI: Opção 'Baixar Metadados (Sem Gravação)' selecionada: {download_metadata_without_recording}")
+        # --- Fim da obtenção do estado dos checkboxes ---
 
         logger.info(f"GUI: Dados coletados para passar ao controlador - URL: {url_base}, Login: {login}, Data Início (com hora): {datainicio_str}, Data Fim (com hora): {datafim_str}")
 
-        # Validação básica dos campos necessários antes de passar para o controlador
-        # O controlador fará validações internas mais específicas da lógica de download/API.
-        if not all([url_base, login, token, datainicio_str, datafim_str]): # Diretório é validado pelo controlador via getter
+        if not all([url_base, login, token, datainicio_str, datafim_str]):
             mensagem_erro = "Erro GUI: Preencha URL, Login, Token e as Datas para iniciar o download."
-            self.atualizar_status(mensagem_erro)
+            self.atualizar_status(mensagem_erro, level=logging.ERROR)
+            messagebox.showerror("Erro de Validação", mensagem_erro)
             logger.warning(mensagem_erro)
-            # Agenda habilitação dos botões na thread principal
-            self.master.after(0, self._enable_download_button)
+            self.master.after(0, self._enable_start_button)
             self.master.after(0, self._enable_save_button)
+            self.master.after(0, self._hide_cancel_button)
             return
 
-        # Validação básica de formato de data/hora completa antes de passar para a API (no controlador)
         try:
             datetime.strptime(datainicio_str, '%Y-%m-%d %H:%M:%S')
             datetime.strptime(datafim_str, '%Y-%m-%d %H:%M:%S')
             logger.info("GUI: Formato de data/hora validado localmente.")
         except ValueError:
-            mensagem_erro = "Erro GUI: Formato de data/hora inválido no campo. Use YYYY-MM-DD."
-            self.atualizar_status(mensagem_erro)
-            logger.error(f"GUI: Falha na validação de formato de data/hora local: '{datainicio_str}' ou '{datafim_str}'")
-            # Agenda habilitação dos botões na thread principal
-            self.master.after(0, self._enable_download_button)
+            mensagem_erro = "Erro GUI: Formato de data/hora inválido no campo. Use %Y-%m-%d." # Corrigido a mensagem
+            self.atualizar_status(mensagem_erro, level=logging.ERROR)
+            messagebox.showerror("Erro de Validação", mensagem_erro)
+            logger.error(f"GUI: Falha na validação de formato de data/hora local: '{datainicio_str}' ou '{datafim_str}'", exc_info=True)
+            self.master.after(0, self._enable_start_button)
             self.master.after(0, self._enable_save_button)
+            self.master.after(0, self._hide_cancel_button)
             return
 
+        self._cancel_event.clear()
 
-        # Passa os dados para o DownloadController iniciar o processo.
-        # O controlador irá executar a lógica em sua própria thread.
         self.atualizar_status("GUI: Passando solicitação para o controlador de download...")
         logger.info("GUI: Chamando download_controller.start_download.")
         self.download_controller.start_download(
@@ -311,10 +383,19 @@ class WidevoiceDownloaderGUI:
             login,
             token,
             datainicio_str,
-            datafim_str
-            # O diretório é obtido pelo controlador via self._get_download_directory()
+            datafim_str,
+            cancel_event=self._cancel_event,
+            download_metadata_with_recording=download_metadata_with_recording, # --- Passa a opção 1 ---
+            download_metadata_without_recording=download_metadata_without_recording # --- Passa a opção 2 ---
         )
-        # O método iniciar_download retorna, a thread de processamento agora está no controlador.
+
+
+    def cancel_download(self):
+        """Método chamado quando o botão Cancelar é clicado."""
+        logger.info("GUI: Botão 'Cancelar Download' clicado. Sinalizando cancelamento.")
+        self.atualizar_status("GUI: Cancelamento solicitado. Aguardando tarefas em execução finalizarem...", level=logging.WARNING)
+        self._set_button_state(self.cancel_button, tk.DISABLED)
+        self._cancel_event.set()
 
 
     # --- Lógica de Salvamento e Carregamento de Configurações ---
@@ -324,39 +405,44 @@ class WidevoiceDownloaderGUI:
         """
         url_base = self.url_entry.get().strip()
         login = self.login_entry.get().strip()
-        token = self.token_entry.get().strip() # Pega o token diretamente da GUI
-        diretorio_destino = self.diretorio_var.get().strip() # Pega o valor da StringVar
-
-        # Obtém apenas a data dos DateEntry para salvar.
+        token = self.token_entry.get().strip()
+        diretorio_destino = self.diretorio_var.get().strip()
         datainicio_date_str_save = self.datainicio_entry.entry.get().strip()
         datafim_date_str_save = self.datafim_entry.entry.get().strip()
 
-        # Validação básica antes de salvar
+        # --- Obter o estado dos checkboxes de metadado para salvar ---
+        download_metadata_with_recording_save = self.download_metadata_with_recording_var.get()
+        download_metadata_without_recording_save = self.download_metadata_without_recording_var.get()
+        # --- Fim da obtenção do estado ---
+
+
         if not all([url_base, login, token, diretorio_destino, datainicio_date_str_save, datafim_date_str_save]):
              mensagem_aviso = "Aviso GUI: Preencha URL, Login, Token, Diretório de Destino e as Datas para salvar as configurações."
-             self.atualizar_status(mensagem_aviso)
+             self.atualizar_status(mensagem_aviso, level=logging.WARNING)
+             messagebox.showwarning("Aviso", mensagem_aviso)
              logger.warning(mensagem_aviso)
              return
 
-        # Prepara o dicionário de configuração para salvar
         config_data_to_save = {
             "url_base": url_base,
             "login": login,
-            "token": token, # Este token será obfuscado pelo security_manager antes de escrever no arquivo
+            "token": token,
             "diretorio_destino": diretorio_destino,
             "datainicio": datainicio_date_str_save,
-            "datafim": datafim_date_str_save
+            "datafim": datafim_date_str_save,
+            "download_metadata_with_recording": download_metadata_with_recording_save, # --- Salvar opção 1 ---
+            "download_metadata_without_recording": download_metadata_without_recording_save # --- Salvar opção 2 ---
         }
 
-        # Chama a função do security_manager para salvar
         logger.info("GUI: Chamando security_manager.save_configuration.")
         if security_manager.save_configuration(config_data_to_save):
              self.atualizar_status("GUI: Configurações salvas com sucesso.")
              logger.info("GUI: Configurações salvas via security_manager.")
+             messagebox.showinfo("Sucesso", "Configurações salvas com sucesso!")
         else:
-             # Mensagem de erro se o salvamento falhar (erro já logado pelo security_manager)
              mensagem_erro = "Erro GUI: Falha ao salvar configurações. Verifique os logs."
-             self.atualizar_status(mensagem_erro)
+             self.atualizar_status(mensagem_erro, level=logging.ERROR)
+             messagebox.showerror("Erro ao Salvar", mensagem_erro)
              logger.error("GUI: Falha ao chamar security_manager.save_configuration.")
 
 
@@ -368,78 +454,78 @@ class WidevoiceDownloaderGUI:
         config_data = security_manager.load_configuration()
 
         if config_data:
-            # Se security_manager.load_configuration retornou um dicionário (sucesso)
             try:
-                # Usa .get() com valor padrão "" (string vazia) para chaves que podem não existir
-                # para evitar KeyErrors e preencher os campos vazios se a chave estiver faltando.
                 self.url_entry.insert(0, config_data.get("url_base", ""))
                 self.login_entry.insert(0, config_data.get("login", ""))
-                # O token já foi deobfuscado pelo security_manager ao carregar, insere diretamente
                 self.token_entry.insert(0, config_data.get("token", ""))
-                # Define o diretório na StringVar, usando o padrão do config se a chave não existir
                 self.diretorio_var.set(config_data.get("diretorio_destino", config.DIRETORIO_BASE_GRAVACOES))
 
-                # Carrega as datas salvas nos campos DateEntry
                 saved_datainicio = config_data.get("datainicio", "")
                 if saved_datainicio:
-                     # Limpa o Entry interno do DateEntry antes de inserir
                      self.datainicio_entry.entry.delete(0, tk.END)
                      self.datainicio_entry.entry.insert(0, saved_datainicio)
+                else:
+                     self._set_default_dates_in_dateentry()
 
                 saved_datafim = config_data.get("datafim", "")
                 if saved_datafim:
-                     # Limpa o Entry interno do DateEntry antes de inserir
                      self.datafim_entry.entry.delete(0, tk.END)
                      self.datafim_entry.entry.insert(0, saved_datafim)
+                else:
+                     self._set_default_dates_in_dateentry()
+
+                # --- Carregar o estado dos checkboxes de metadado ---
+                # Usa .get(key, default_value) para compatibilidade com arquivos antigos
+                loaded_metadata_with_recording = config_data.get("download_metadata_with_recording", True) # Default é True
+                loaded_metadata_without_recording = config_data.get("download_metadata_without_recording", True) # Default é True
+                self.download_metadata_with_recording_var.set(loaded_metadata_with_recording)
+                self.download_metadata_without_recording_var.set(loaded_metadata_without_recording)
+                # --- Fim do carregamento do estado dos checkboxes ---
+
 
                 logger.info("GUI: Configurações carregadas pelo security_manager e GUI preenchida.")
 
             except Exception as e:
-                 # Captura erros durante o preenchimento da GUI após carregar as configurações
                  mensagem_erro = f"Erro GUI: Erro ao preencher a GUI com configurações carregadas: {e}. Configurações podem estar corrompidas ou incompletas."
-                 self.atualizar_status(mensagem_erro)
+                 self.atualizar_status(mensagem_erro, level=logging.ERROR)
+                 messagebox.showerror("Erro ao Carregar Configurações", mensagem_erro)
                  logger.error(mensagem_erro, exc_info=True)
-                 # Limpa os campos para evitar carregar dados parciais ou incorretos
                  self._clear_gui_fields()
-                 # Define as datas iniciais padrão nos DateEntry após limpar
                  self._set_default_dates_in_dateentry()
+                 # Define o valor padrão para os checkboxes em caso de erro no carregamento
+                 self.download_metadata_with_recording_var.set(True)
+                 self.download_metadata_without_recording_var.set(True)
 
 
         else:
-            # Se security_manager.load_configuration retornou None (arquivo não encontrado ou erro de carregamento no manager)
-            # A mensagem de erro (se houver) já foi logada pelo security_manager.
-            # Garantimos que os campos da GUI estejam vazios (exceto pelo diretório padrão e datas padrão nos DateEntry).
             logger.info("GUI: Carregamento de configurações via security_manager retornou None. GUI inicializada com padrões/vazio.")
-            self._clear_gui_fields() # Limpa todos os campos
-            # Garante que os campos DateEntry mostrem a data atual
+            self._clear_gui_fields()
             self._set_default_dates_in_dateentry()
+            # Define o valor padrão para os checkboxes se não houver configuração
+            self.download_metadata_with_recording_var.set(True)
+            self.download_metadata_without_recording_var.set(True)
 
 
     def _clear_gui_fields(self):
-        """Limpa todos os campos de entrada na GUI."""
+        """Limpa campos de entrada específicos na GUI."""
         self.url_entry.delete(0, tk.END)
         self.login_entry.delete(0, tk.END)
         self.token_entry.delete(0, tk.END)
-        self.diretorio_var.set(config.DIRETORIO_BASE_GRAVACOES)
         self.datainicio_entry.entry.delete(0, tk.END)
         self.datafim_entry.entry.delete(0, tk.END)
-        logger.debug("GUI: Campos da GUI limpos.")
+        logger.debug("GUI: Campos de URL, Login, Token e Datas limpos.")
 
 
     def _set_default_dates_in_dateentry(self):
-         """Define as datas padrão (data atual) nos widgets DateEntry."""
+         """Define as datas padrão (data atual) nos widgets DateEntry se estiverem vazios."""
          try:
              today_date_str = datetime.now().strftime("%Y-%m-%d")
-             self.datainicio_entry.entry.delete(0, tk.END)
-             self.datainicio_entry.entry.insert(0, today_date_str)
-             self.datafim_entry.entry.delete(0, tk.END)
-             self.datafim_entry.entry.insert(0, today_date_str)
-             logger.debug(f"GUI: Datas padrão ({today_date_str}) definidas nos campos DateEntry.")
+             if not self.datainicio_entry.entry.get().strip():
+                 self.datainicio_entry.entry.delete(0, tk.END)
+                 self.datainicio_entry.entry.insert(0, today_date_str)
+             if not self.datafim_entry.entry.get().strip():
+                 self.datafim_entry.entry.delete(0, tk.END)
+                 self.datafim_entry.entry.insert(0, today_date_str)
+             logger.debug(f"GUI: Datas padrão ({today_date_str}) definidas nos campos DateEntry, se vazios.")
          except Exception as e:
-              logger.error(f"GUI: Erro ao definir datas padrão nos campos DateEntry: {e}")
-
-
-    # --- Métodos de Processamento em Thread (REMOVIDOS - Agora no DownloadController) ---
-    # As funções processar_download e _processar_sem_gravacao foram movidas para download_controller.py.
-    # def processar_download(self, ...): pass
-    # def _processar_sem_gravacao(self, ...): pass
+              logger.error(f"GUI: Erro ao definir datas padrão nos campos DateEntry: {e}", exc_info=True)
