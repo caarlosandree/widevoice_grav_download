@@ -1,29 +1,28 @@
-import tkinter as tk # Adicione de volta esta linha para constantes como tk.END e StringVar
+import tkinter as tk
 
-import ttkbootstrap as ttk # Importe ttkbootstrap
-from tkinter import filedialog # Importe filedialog da forma padrão do tkinter
-from tkinter import scrolledtext # Importe scrolledtext da forma padrão do tkinter
+import ttkbootstrap as ttk
+from ttkbootstrap.widgets import DateEntry
+import tkinter.filedialog as filedialog
+from tkinter import scrolledtext
 
-import threading
+import threading # Ainda necessário para a thread principal que chama o controlador
 from datetime import datetime
 import os
-import json
 import logging
-import concurrent.futures
+# Removido import concurrent.futures pois o executor está no DownloadController
+# import concurrent.futures
 
-# Importa o novo módulo do seletor de data
-from date_picker_dialog import DatePickerDialog
-
-# Importa as funcionalidades de outros módulos
-from api_handler import construir_url_api, obter_dados_completos
-from recording_downloader import baixar_gravacao
+# Importa os módulos necessários
+import security_manager
 import config
+# Importa o novo controlador de download
+from download_controller import DownloadController
 
-CONFIG_FILE = "config.json"
+# Remove definição de MAX_WORKERS pois está no DownloadController
+# MAX_WORKERS = 5
 
 logger = logging.getLogger(__name__)
 
-MAX_WORKERS = 5 # Número máximo de downloads paralelos
 
 class WidevoiceDownloaderGUI:
     def __init__(self, master):
@@ -38,53 +37,44 @@ class WidevoiceDownloaderGUI:
         self.url_entry = ttk.Entry(self.frame_inputs, width=50)
         self.url_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
 
-
         ttk.Label(self.frame_inputs, text="Login:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
         self.login_entry = ttk.Entry(self.frame_inputs, width=50)
         self.login_entry.grid(row=1, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
 
-
         ttk.Label(self.frame_inputs, text="Token:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
-        # Mantenha show="*" para ocultar o token na tela
         self.token_entry = ttk.Entry(self.frame_inputs, show="*", width=50)
         self.token_entry.grid(row=2, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
 
+        ttk.Label(self.frame_inputs, text="Data Início (YYYY-MM-DD):").grid(row=3, column=0, padx=5, pady=5, sticky="w")
+        self.datainicio_entry = DateEntry(
+            self.frame_inputs,
+            bootstyle="primary",
+            dateformat="%Y-%m-%d",
+            startdate=datetime.now().date()
+        )
+        self.datainicio_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
 
-        # Campo e Botão para Data Início
-        ttk.Label(self.frame_inputs, text="Data Início (YYYY-MM-DD HH:mm:ss):").grid(row=3, column=0, padx=5, pady=5, sticky="w")
-        self.datainicio_entry = ttk.Entry(self.frame_inputs, width=40)
-        self.datainicio_entry.grid(row=3, column=1, padx=5, pady=5, sticky="ew")
-        self.datainicio_entry.insert(0, datetime.now().strftime('%Y-%m-%d 00:00:00'))
-
-        self.btn_selecionar_data_inicio = ttk.Button(self.frame_inputs, text="...", width=3, command=lambda: self.abrir_seletor_data(self.datainicio_entry))
-        self.btn_selecionar_data_inicio.grid(row=3, column=2, padx=0, pady=5)
-
-
-        # Campo e Botão para Data Fim
-        ttk.Label(self.frame_inputs, text="Data Fim (YYYY-MM-DD HH:mm:ss):").grid(row=4, column=0, padx=5, pady=5, sticky="w")
-        self.datafim_entry = ttk.Entry(self.frame_inputs, width=40)
-        self.datafim_entry.grid(row=4, column=1, padx=5, pady=5, sticky="ew")
-        self.datafim_entry.insert(0, datetime.now().strftime('%Y-%m-%d 23:59:59'))
-
-        self.btn_selecionar_data_fim = ttk.Button(self.frame_inputs, text="...", width=3, command=lambda: self.abrir_seletor_data(self.datafim_entry))
-        self.btn_selecionar_data_fim.grid(row=4, column=2, padx=0, pady=5)
+        ttk.Label(self.frame_inputs, text="Data Fim (YYYY-MM-DD):").grid(row=4, column=0, padx=5, pady=5, sticky="w")
+        self.datafim_entry = DateEntry(
+            self.frame_inputs,
+            bootstyle="primary",
+            dateformat="%Y-%m-%d",
+            startdate=datetime.now().date()
+        )
+        self.datafim_entry.grid(row=4, column=1, padx=5, pady=5, sticky="ew", columnspan=2)
 
         self.frame_inputs.columnconfigure(1, weight=1)
         self.frame_inputs.columnconfigure(2, weight=0)
 
-
-        # --- Diretório de Destino ---
         self.frame_destino = ttk.LabelFrame(master, text="Diretório de Destino")
         self.frame_destino.grid(row=1, column=0, padx=10, pady=5, sticky="ew")
 
         self.diretorio_label = ttk.Label(self.frame_destino, text="Diretório de Salvamento:")
         self.diretorio_label.grid(row=0, column=0, padx=5, pady=5, sticky="w")
 
-        # Use StringVar para gerenciar o texto do campo de diretório
         self.diretorio_var = tk.StringVar()
-        self.diretorio_entry = ttk.Entry(self.frame_destino, width=40, textvariable=self.diretorio_var) # Associe a StringVar
+        self.diretorio_entry = ttk.Entry(self.frame_destino, width=40, textvariable=self.diretorio_var)
         self.diretorio_entry.grid(row=0, column=1, padx=5, pady=5, sticky="ew")
-        # Inicialize a StringVar com o diretório padrão (pode ser sobrescrito ao carregar config)
         self.diretorio_var.set(config.DIRETORIO_BASE_GRAVACOES)
 
 
@@ -93,27 +83,20 @@ class WidevoiceDownloaderGUI:
 
         self.frame_destino.columnconfigure(1, weight=1)
 
-
-        # --- Botões de Ação ---
         self.frame_botoes_acao = ttk.Frame(master)
         self.frame_botoes_acao.grid(row=2, column=0, padx=10, pady=10, sticky="ew")
         self.frame_botoes_acao.columnconfigure(0, weight=1)
         self.frame_botoes_acao.columnconfigure(1, weight=0)
         self.frame_botoes_acao.columnconfigure(2, weight=0)
 
-
-        # Barra de Progresso
         self.progress_bar = ttk.Progressbar(self.frame_botoes_acao, orient="horizontal", length=400, mode="determinate")
         self.progress_bar.grid(row=0, column=0, padx=5, pady=5, sticky="ew")
 
-        # Botão Salvar Configurações
         self.save_button = ttk.Button(self.frame_botoes_acao, text="Salvar Configurações", command=self.salvar_configuracoes_button_click)
         self.save_button.grid(row=0, column=1, padx=5, pady=5)
 
-        # Botão de Download
         self.download_button = ttk.Button(self.frame_botoes_acao, text="Iniciar Download", command=self.iniciar_download)
         self.download_button.grid(row=0, column=2, padx=5, pady=5)
-
 
         # Área de Status/Log da GUI
         self.status_label = ttk.Label(master, text="Status:")
@@ -121,58 +104,111 @@ class WidevoiceDownloaderGUI:
         self.status_text = scrolledtext.ScrolledText(master, wrap=ttk.WORD, width=80, height=15)
         self.status_text.grid(row=4, column=0, padx=10, pady=10, sticky="nsew")
 
+        # --- Configurar Tags para Status ---
+        self.status_text.tag_configure('info', foreground='black')  # Cor padrão para informações
+        self.status_text.tag_configure('warning', foreground='orange')  # Cor para avisos
+        self.status_text.tag_configure('error', foreground='red')  # Cor para erros
+        # Você pode adicionar outros estilos aqui, como negrito, etc.
+        # Exemplo: self.status_text.tag_configure('error', foreground='red', font=('Arial', 9, 'bold'))
+
         # Configurações para redimensionamento da janela principal
         master.columnconfigure(0, weight=1)
         master.rowconfigure(4, weight=1)
 
+        # Configurações para redimensionamento da janela principal
+        master.columnconfigure(0, weight=1)
+        master.rowconfigure(4, weight=1)
 
-        # Carregar configurações ao iniciar - Adicionado tratamento de erro específico
+        # Cria uma instância do DownloadController, passando os callbacks da GUI
+        self.download_controller = DownloadController(
+            status_callback=self.atualizar_status,
+            progress_callback=self.atualizar_progresso,
+            completion_callback=self._process_download_completed, # Novo callback de conclusão
+            directory_getter=self._get_download_directory # Callback para obter o diretório
+        )
+
+
+        # Carregar configurações ao iniciar
         self.carregar_configuracoes()
 
 
+    # --- Métodos Auxiliares para Gerenciar Botões (seguro para thread - chamados via after) ---
+    # Estes métodos são agora callbacks para o DownloadController
     def _enable_download_button(self):
         """Habilita o botão de download na thread principal."""
-        logger.info("Executando _enable_download_button na thread principal.")
+        logger.info("GUI: Habilitando botão 'Iniciar Download'.")
         try:
             self.download_button.config(state=tk.NORMAL)
-            logger.info("Botão 'Iniciar Download' habilitado.")
         except Exception as e:
-            logger.error(f"Erro ao habilitar botão 'Iniciar Download': {e}")
+            logger.error(f"GUI: Erro ao habilitar botão 'Iniciar Download': {e}")
 
     def _enable_save_button(self):
         """Habilita o botão de salvar na thread principal."""
-        logger.info("Executando _enable_save_button na thread principal.")
+        logger.info("GUI: Habilitando botão 'Salvar Configurações'.")
         try:
             self.save_button.config(state=tk.NORMAL)
-            logger.info("Botão 'Salvar Configurações' habilitado.")
         except Exception as e:
-            logger.error(f"Erro ao habilitar botão 'Salvar Configurações': {e}")
+            logger.error(f"GUI: Erro ao habilitar botão 'Salvar Configurações': {e}")
+
+    def _process_download_completed(self):
+         """Callback chamado pelo DownloadController quando o processo termina."""
+         logger.info("GUI: Callback de conclusão do processo de download recebido.")
+         # Agenda a reabilitação dos botões na thread principal
+         self.master.after(0, self._enable_download_button)
+         self.master.after(0, self._enable_save_button)
+         logger.info("GUI: Reabilitação de botões agendada.")
 
 
-    def atualizar_status(self, mensagem): # Corrigi o typo aqui
-        """Atualiza a área de texto de status (seguro para chamar de qualquer thread)."""
+    # --- Métodos Auxiliares para Atualizar GUI (seguro para thread - chamados via after) ---
+    # Estes métodos são agora callbacks para o DownloadController
+    def atualizar_status(self, mensagem, level=logging.INFO):
+        """
+        Atualiza a área de texto de status (seguro para chamar de qualquer thread).
+        Mapeia o nível de log para uma tag de formatação.
+        """
+        # Mapeia o nível de log para o nome da tag
+        tag = 'info'  # Tag padrão
+        if level == logging.WARNING:
+            tag = 'warning'
+        elif level == logging.ERROR:
+            tag = 'error'
+        # Adicione outros mapeamentos conforme necessário
+
         try:
-            self.master.after(0, self._inserir_status, mensagem)
+            # Usa after(0, ...) para agendar a execução na thread principal, passando a tag
+            self.master.after(0, self._inserir_status, mensagem, tag)
         except Exception as e:
-            logger.error(f"Erro ao agendar atualização de status: {e} - Mensagem: {mensagem}")
+            logger.error(f"GUI: Erro ao agendar atualização de status: {e} - Mensagem: {mensagem}, Nível: {level}",
+                         exc_info=True)
 
+    # O metodo _inserir_status foi modificado para aceitar 'tag'.
+    # def _inserir_status(self, mensagem, tag=None): ...
 
-    def _inserir_status(self, mensagem):
-         """Método interno para inserir texto no widget de status e logar."""
-         try:
-             self.status_text.insert(tk.END, mensagem + "\n")
-             self.status_text.see(tk.END)
-             logger.info(f"STATUS GUI: {mensagem}")
-         except Exception as e:
-             logger.error(f"Erro ao inserir status na GUI: {e} - Mensagem: {mensagem}")
+    def _inserir_status(self, mensagem, tag=None):
+        """
+        Metodo interno para inserir texto no widget de status e logar.
+        Aceita um argumento 'tag' para aplicar formatação.
+        """
+        try:
+            # Insere a mensagem e a quebra de linha
+            self.status_text.insert(tk.END, mensagem + "\n", tag)  # Aplica a tag aqui
+            self.status_text.see(tk.END)  # Rola para ver a última mensagem
+            # Logging da mensagem de status já acontece dentro do _log_and_status do controlador ou aqui se for chamado diretamente
+            # logger.info(f"STATUS GUI: {mensagem}") # Evita logar a mesma mensagem duas vezes se vindo do controlador
+        except Exception as e:
+            logger.error(f"GUI: Erro ao inserir status na GUI: {e} - Mensagem: {mensagem}", exc_info=True)
+
+    # O metodo atualizar_status precisará ser ajustado para passar a tag/nível
+    # Faremos isso depois de definir as tags na GUI e ajustar o controlador.
 
 
     def atualizar_progresso(self, valor):
          """Atualiza o valor da barra de progresso (seguro para chamar de qualquer thread)."""
          try:
+            # Usa after(0, ...) para agendar a execução na thread principal
             self.master.after(0, self._configurar_progresso, valor)
          except Exception as e:
-             logger.error(f"Erro ao agendar atualização de progresso: {e} - Valor: {valor}")
+             logger.error(f"GUI: Erro ao agendar atualização de progresso: {e} - Valor: {valor}")
 
 
     def _configurar_progresso(self, valor):
@@ -180,290 +216,230 @@ class WidevoiceDownloaderGUI:
          try:
              self.progress_bar['value'] = valor
          except Exception as e:
-             logger.error(f"Erro ao configurar barra de progresso: {e} - Valor: {valor}")
+             logger.error(f"GUI: Erro ao configurar barra de progresso: {e} - Valor: {valor}")
+
+    # Nota: A atualização do valor máximo da barra de progresso ainda precisa ser feita na GUI,
+    # pois é um widget da GUI. A GUI receberá o total_chamadas do controlador
+    # e agendará essa atualização na thread principal. Vamos ajustar iniciar_download para isso.
 
 
+    # --- Métodos de Interação da GUI ---
     def selecionar_diretorio(self):
         """Abre uma caixa de diálogo para o usuário selecionar o diretório de destino."""
         diretorio_selecionado = filedialog.askdirectory(
-            initialdir=self.diretorio_var.get() or os.path.expanduser("~"), # Use o valor da StringVar
+            initialdir=self.diretorio_var.get() or os.path.expanduser("~"),
             title="Selecione o Diretório para Salvar Gravações"
         )
         if diretorio_selecionado:
-            self.diretorio_var.set(diretorio_selecionado) # Defina o valor na StringVar
-            logger.info(f"Diretório de destino selecionado via GUI: {diretorio_selecionado}")
+            self.diretorio_var.set(diretorio_selecionado)
+            logger.info(f"GUI: Diretório de destino selecionado via GUI: {diretorio_selecionado}")
 
-
-    def abrir_seletor_data(self, entry_widget):
-        """Cria e exibe a janela do seletor de data."""
-        from date_picker_dialog import DatePickerDialog
-
-        current_date_str = entry_widget.get().split(" ")[0]
-        try:
-            initial_date = datetime.strptime(current_date_str, '%Y-%m-%d')
-            logger.debug(f"Data inicial para o seletor: {initial_date.strftime('%Y-%m-%d')}")
-        except (ValueError, TypeError):
-            initial_date = datetime.now()
-            logger.debug("Data no campo inválida, usando data atual para o seletor.")
-
-        date_picker = DatePickerDialog(self.master, entry_widget, initial_date)
+    def _get_download_directory(self):
+        """Método getter para o DownloadController obter o diretório de destino atual da GUI."""
+        return self.diretorio_var.get().strip()
 
 
     def iniciar_download(self):
-        """Inicia o processo de download em uma thread separada."""
+        """
+        Coleta dados da GUI, valida e passa a solicitação de download para o DownloadController.
+        """
+        # Desabilita botões durante o processo
         self.download_button.config(state=tk.DISABLED)
         self.save_button.config(state=tk.DISABLED)
-        self.atualizar_status("Iniciando processo de download...") # Use a função corrigida
-        logger.info("Botão 'Iniciar Download' clicado.")
+        self.atualizar_status("GUI: Coletando dados e validando para iniciar download...")
+        logger.info("GUI: Botão 'Iniciar Download' clicado. Coletando dados.")
 
         # Limpa status e progresso para um novo download
         try:
             self.status_text.delete(1.0, tk.END)
             self.atualizar_progresso(0)
+            self.progress_bar['maximum'] = 100 # Reseta o máximo inicialmente
         except Exception as e:
-             logger.error(f"Erro ao limpar status ou progresso antes de iniciar download: {e}")
+             logger.error(f"GUI: Erro ao limpar status ou progresso antes de iniciar download: {e}")
 
 
         # Coleta os dados da GUI
         url_base = self.url_entry.get().strip()
         login = self.login_entry.get().strip()
-        token = self.token_entry.get().strip()
-        datainicio_str = self.datainicio_entry.get().strip()
-        datafim_str = self.datafim_entry.get().strip()
-        diretorio_destino = self.diretorio_var.get().strip() # Pega o valor da StringVar
+        token = self.token_entry.get().strip() # Pega o token diretamente da GUI (já deobfuscado ao carregar)
 
-        logger.info(f"Dados coletados da GUI para download - URL: {url_base}, Login: {login}, Data Início: {datainicio_str}, Data Fim: {datafim_str}, Diretório: {diretorio_destino}")
+        # Obtém apenas a data dos DateEntry e adiciona a hora padrão
+        datainicio_date_str = self.datainicio_entry.entry.get().strip()
+        datafim_date_str = self.datafim_entry.entry.get().strip()
 
+        # Adiciona a parte da hora para formar a string completa no formato esperado pela API
+        datainicio_str = f"{datainicio_date_str} 00:00:00" if datainicio_date_str else ""
+        datafim_str = f"{datafim_date_str} 23:59:59" if datafim_date_str else ""
 
-        # Validação básica
-        if not all([url_base, login, token, datainicio_str, datafim_str, diretorio_destino]):
-            mensagem_erro = "Erro: Todos os campos precisam ser preenchidos para iniciar o download."
-            self.atualizar_status(mensagem_erro) # Use a função corrigida
+        # Não precisamos coletar o diretorio_destino aqui diretamente,
+        # o DownloadController irá obtê-lo via self._get_download_directory()
+
+        logger.info(f"GUI: Dados coletados para passar ao controlador - URL: {url_base}, Login: {login}, Data Início (com hora): {datainicio_str}, Data Fim (com hora): {datafim_str}")
+
+        # Validação básica dos campos necessários antes de passar para o controlador
+        # O controlador fará validações internas mais específicas da lógica de download/API.
+        if not all([url_base, login, token, datainicio_str, datafim_str]): # Diretório é validado pelo controlador via getter
+            mensagem_erro = "Erro GUI: Preencha URL, Login, Token e as Datas para iniciar o download."
+            self.atualizar_status(mensagem_erro)
             logger.warning(mensagem_erro)
-            self.master.after(0, self.download_button.config, state=tk.NORMAL)
-            self.master.after(0, self.save_button.config, state=tk.NORMAL)
+            # Agenda habilitação dos botões na thread principal
+            self.master.after(0, self._enable_download_button)
+            self.master.after(0, self._enable_save_button)
             return
 
-        # Validação básica de formato de data
+        # Validação básica de formato de data/hora completa antes de passar para a API (no controlador)
         try:
             datetime.strptime(datainicio_str, '%Y-%m-%d %H:%M:%S')
             datetime.strptime(datafim_str, '%Y-%m-%d %H:%M:%S')
-            logger.info("Formato de data validado com sucesso.")
+            logger.info("GUI: Formato de data/hora validado localmente.")
         except ValueError:
-            mensagem_erro = "Erro: Formato de data/hora inválido. UseYYYY-MM-DD HH:mm:ss."
-            self.atualizar_status(mensagem_erro) # Use a função corrigida
-            logger.warning(mensagem_erro)
-            self.master.after(0, self.download_button.config, state=tk.NORMAL)
-            self.master.after(0, self.save_button.config, state=tk.NORMAL)
+            mensagem_erro = "Erro GUI: Formato de data/hora inválido no campo. Use YYYY-MM-DD."
+            self.atualizar_status(mensagem_erro)
+            logger.error(f"GUI: Falha na validação de formato de data/hora local: '{datainicio_str}' ou '{datafim_str}'")
+            # Agenda habilitação dos botões na thread principal
+            self.master.after(0, self._enable_download_button)
+            self.master.after(0, self._enable_save_button)
             return
 
-        # Cria e inicia a thread para o download
-        logger.info("Criando e iniciando thread para processar download.")
-        download_thread = threading.Thread(
-            target=self.processar_download,
-            args=(url_base, login, token, datainicio_str, datafim_str, diretorio_destino)
+
+        # Passa os dados para o DownloadController iniciar o processo.
+        # O controlador irá executar a lógica em sua própria thread.
+        self.atualizar_status("GUI: Passando solicitação para o controlador de download...")
+        logger.info("GUI: Chamando download_controller.start_download.")
+        self.download_controller.start_download(
+            url_base,
+            login,
+            token,
+            datainicio_str,
+            datafim_str
+            # O diretório é obtido pelo controlador via self._get_download_directory()
         )
-        download_thread.start()
+        # O método iniciar_download retorna, a thread de processamento agora está no controlador.
 
 
+    # --- Lógica de Salvamento e Carregamento de Configurações ---
     def salvar_configuracoes_button_click(self):
-        """Coleta dados da GUI, incluindo o token e o diretório (da StringVar), e salva."""
+        """
+        Coleta dados da GUI e solicita ao security_manager que salve a configuração.
+        """
         url_base = self.url_entry.get().strip()
         login = self.login_entry.get().strip()
-        token = self.token_entry.get().strip()
+        token = self.token_entry.get().strip() # Pega o token diretamente da GUI
         diretorio_destino = self.diretorio_var.get().strip() # Pega o valor da StringVar
 
-        if not all([url_base, login, token, diretorio_destino]):
-             mensagem_aviso = "Aviso: Preencha URL, Login, Token e Diretório de Destino para salvar as configurações."
-             self.atualizar_status(mensagem_aviso) # Use a função corrigida
+        # Obtém apenas a data dos DateEntry para salvar.
+        datainicio_date_str_save = self.datainicio_entry.entry.get().strip()
+        datafim_date_str_save = self.datafim_entry.entry.get().strip()
+
+        # Validação básica antes de salvar
+        if not all([url_base, login, token, diretorio_destino, datainicio_date_str_save, datafim_date_str_save]):
+             mensagem_aviso = "Aviso GUI: Preencha URL, Login, Token, Diretório de Destino e as Datas para salvar as configurações."
+             self.atualizar_status(mensagem_aviso)
              logger.warning(mensagem_aviso)
              return
 
-        self.salvar_configuracoes(url_base, login, token, diretorio_destino)
-        self.atualizar_status("Configurações (incluindo Token) salvas com sucesso.") # Use a função corrigida
-        logger.info("Botão 'Salvar Configurações' clicado. Configurações coletadas e salvando (incluindo Token).")
-
-
-    def salvar_configuracoes(self, url_base, login, token, diretorio_destino):
-        """Salva as configurações (incluindo o token e diretório) em um arquivo JSON."""
-        config_data = {
+        # Prepara o dicionário de configuração para salvar
+        config_data_to_save = {
             "url_base": url_base,
             "login": login,
-            "token": token,
-            "diretorio_destino": diretorio_destino # Salva o valor da StringVar
+            "token": token, # Este token será obfuscado pelo security_manager antes de escrever no arquivo
+            "diretorio_destino": diretorio_destino,
+            "datainicio": datainicio_date_str_save,
+            "datafim": datafim_date_str_save
         }
-        try:
-            with open(CONFIG_FILE, 'w') as f:
-                json.dump(config_data, f, indent=4)
-            logger.info(f"Configurações (incluindo Token) salvas em {CONFIG_FILE}")
-        except Exception as e:
-            mensagem_erro = f"Erro ao salvar configurações em {CONFIG_FILE}: {e}"
-            self.atualizar_status(mensagem_erro) # Use a função corrigida
-            logger.error(mensagem_erro, exc_info=True)
 
-
-    def processar_download(self, url_base, login, token, datainicio_str, datafim_str, diretorio_destino):
-        """
-        Lógica principal de download a ser executada em uma thread separada.
-        Implementa download paralelo.
-        """
-        logger.info("Thread de download iniciada.")
-        try:
-            url_api = construir_url_api(url_base, login, token)
-            # Passe a função de status corrigida
-            dados_chamadas = obter_dados_completos(url_api, datainicio_str, datafim_str, status_callback=self.atualizar_status)
-
-            if dados_chamadas is None:
-                self.atualizar_status("Falha ao obter dados da API. Verifique logs para mais detalhes.") # Use a função corrigida
-                logger.error("Falha ao obter dados da API.")
-                self.atualizar_progresso(0)
-                return
-
-            if not isinstance(dados_chamadas, list) or not dados_chamadas:
-                self.atualizar_status("Nenhum resultado encontrado ou resposta da API em formato inesperado.") # Use a função corrigida
-                logger.info("Nenhum resultado encontrado ou resposta da API em formato inesperado.")
-                self.atualizar_progresso(100)
-                return
-
-            total_chamadas = len(dados_chamadas)
-            self.atualizar_status(f"\nEncontrados {total_chamadas} registros de chamadas.") # Use a função corrigida
-            logger.info(f"Encontrados {total_chamadas} registros de chamadas.")
-
-            self.progress_bar['maximum'] = total_chamadas
-            self.atualizar_progresso(0)
-
-            gravacoes_baixadas_count = 0
-            erros_download_count = 0
-            processados_count = 0
-
-
-            with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                future_to_chamada = {}
-
-                for chamada in dados_chamadas:
-                     if 'gravacao' in chamada and chamada['gravacao']:
-                          # Passe a função de status corrigida
-                          future = executor.submit(baixar_gravacao, url_base, chamada, diretorio_destino, self.atualizar_status)
-                          future_to_chamada[future] = chamada
-                     else:
-                          # Passe a função de status corrigida
-                          future = executor.submit(self._processar_sem_gravacao, chamada, self.atualizar_status)
-                          future_to_chamada[future] = chamada
-
-
-                for future in concurrent.futures.as_completed(future_to_chamada):
-                    processados_count += 1
-                    self.atualizar_progresso(processados_count)
-
-                    chamada_original = future_to_chamada[future]
-
-                    try:
-                        download_successful = future.result()
-
-                    except Exception as exc:
-                        chamada_id = chamada_original.get('id', 'desconhecido')
-                        mensagem_erro = f"Ocorreu uma exceção ao processar a chamada ID {chamada_id}: {exc}"
-                        self.atualizar_status(mensagem_erro) # Use a função corrigida
-                        logger.exception(mensagem_erro)
-
-
-            gravacoes_baixadas_count = 0
-            erros_download_count = 0
-            # Recontar sucessos e falhas após a conclusão de todos os futures
-            for future in future_to_chamada:
-                try:
-                    # Apenas verifique o resultado se a gravação existia na chamada original
-                    chamada_original = future_to_chamada[future]
-                    if 'gravacao' in chamada_original and chamada_original['gravacao']:
-                        if future.result() is True:
-                             gravacoes_baixadas_count += 1
-                        else:
-                             erros_download_count += 1
-                except Exception:
-                     # Se houve exceção não tratada no future (já logada acima), conte como erro de download
-                     chamada_original = future_to_chamada[future]
-                     if 'gravacao' in chamada_original and chamada_original['gravacao']:
-                          erros_download_count += 1
-
-
-            self.atualizar_status("\n--- Processo Finalizado ---") # Use a função corrigida
-            self.atualizar_status(f"Gravações baixadas com sucesso: {gravacoes_baixadas_count}") # Use a função corrigida
-            if erros_download_count > 0:
-                self.atualizar_status(f"Erros durante o download: {erros_download_count}") # Use a função corrigida
-                self.atualizar_status("Verifique as mensagens de erro acima para detalhes.") # Use a função corrigida
-                logger.warning(f"Processo finalizado com {erros_download_count} erros de download.")
-            else:
-                 logger.info("Processo finalizado com sucesso.")
-
-
-            self.atualizar_progresso(total_chamadas)
-
-
-        except Exception as e:
-            mensagem_erro_inesperado = f"Ocorreu um erro inesperado durante o processamento principal: {e}"
-            self.atualizar_status(mensagem_erro_inesperado) # Use a função corrigida
-            logger.exception(mensagem_erro_inesperado)
-
-
-        finally:
-            # Adicione logging para confirmar que este bloco é alcançado
-            logger.info("Processo de download finalizado. Tentando habilitar botões.")
-            # Use as novas funções auxiliares agendadas na thread principal
-            self.master.after(0, self._enable_download_button)
-            self.master.after(0, self._enable_save_button)
-            logger.info("Bloco finally em processar_download concluído.")
-
-
-    def _processar_sem_gravacao(self, chamada, status_callback):
-        """Método auxiliar para processar chamadas sem gravação (para contagem e status)."""
-        numero_chamada = chamada.get('numero', 'desconhecido')
-        datahora_chamada = chamada.get('datahora', 'desconhecido')
-        mensagem = f"Chamada: Número {numero_chamada} em {datahora_chamada} - Não possui gravação."
-        if status_callback:
-             status_callback(mensagem)
-        logger.info(mensagem)
-        return True
+        # Chama a função do security_manager para salvar
+        logger.info("GUI: Chamando security_manager.save_configuration.")
+        if security_manager.save_configuration(config_data_to_save):
+             self.atualizar_status("GUI: Configurações salvas com sucesso.")
+             logger.info("GUI: Configurações salvas via security_manager.")
+        else:
+             # Mensagem de erro se o salvamento falhar (erro já logado pelo security_manager)
+             mensagem_erro = "Erro GUI: Falha ao salvar configurações. Verifique os logs."
+             self.atualizar_status(mensagem_erro)
+             logger.error("GUI: Falha ao chamar security_manager.save_configuration.")
 
 
     def carregar_configuracoes(self):
-        """Carrega as configurações de um arquivo JSON, incluindo o token e diretório (na StringVar)."""
-        try:
-            if os.path.exists(CONFIG_FILE):
-                with open(CONFIG_FILE, 'r') as f:
-                    config_data = json.load(f)
-                    # Carrega os dados, usando .get() com valor padrão para evitar KeyError se a chave estiver faltando
-                    self.url_entry.insert(0, config_data.get("url_base", ""))
-                    self.login_entry.insert(0, config_data.get("login", ""))
-                    self.token_entry.insert(0, config_data.get("token", "")) # Carrega o token
-                    self.diretorio_var.set(config_data.get("diretorio_destino", config.DIRETORIO_BASE_GRAVACOES)) # Carrega o diretório na StringVar
+        """
+        Carrega as configurações usando o security_manager e preenche a GUI.
+        """
+        logger.info("GUI: Tentando carregar configurações via security_manager.")
+        config_data = security_manager.load_configuration()
 
-                logger.info(f"Configurações carregadas de {CONFIG_FILE}")
+        if config_data:
+            # Se security_manager.load_configuration retornou um dicionário (sucesso)
+            try:
+                # Usa .get() com valor padrão "" (string vazia) para chaves que podem não existir
+                # para evitar KeyErrors e preencher os campos vazios se a chave estiver faltando.
+                self.url_entry.insert(0, config_data.get("url_base", ""))
+                self.login_entry.insert(0, config_data.get("login", ""))
+                # O token já foi deobfuscado pelo security_manager ao carregar, insere diretamente
+                self.token_entry.insert(0, config_data.get("token", ""))
+                # Define o diretório na StringVar, usando o padrão do config se a chave não existir
+                self.diretorio_var.set(config_data.get("diretorio_destino", config.DIRETORIO_BASE_GRAVACOES))
 
-            else:
-                 logger.info(f"Arquivo de configuração {CONFIG_FILE} não encontrado ao carregar. Usando valores padrão/vazios.")
+                # Carrega as datas salvas nos campos DateEntry
+                saved_datainicio = config_data.get("datainicio", "")
+                if saved_datainicio:
+                     # Limpa o Entry interno do DateEntry antes de inserir
+                     self.datainicio_entry.entry.delete(0, tk.END)
+                     self.datainicio_entry.entry.insert(0, saved_datainicio)
 
-        except FileNotFoundError:
-             logger.warning(f"Arquivo de configuração {CONFIG_FILE} não encontrado ao carregar. Usando valores padrão/vazios.")
-             # Não é necessário limpar campos aqui, pois já são inicializados vazios ou com padrão
+                saved_datafim = config_data.get("datafim", "")
+                if saved_datafim:
+                     # Limpa o Entry interno do DateEntry antes de inserir
+                     self.datafim_entry.entry.delete(0, tk.END)
+                     self.datafim_entry.entry.insert(0, saved_datafim)
 
-        except json.JSONDecodeError as e:
-             # Se o arquivo existir mas for inválido, logue e limpe/resete os campos relevantes
-             mensagem_erro = f"Erro ao decodificar o arquivo de configurações {CONFIG_FILE}: {e}. Verifique o formato do arquivo."
-             self.atualizar_status(mensagem_erro) # Tente exibir o erro na GUI
-             logger.error(mensagem_erro, exc_info=True)
-             # Limpe os campos para evitar carregar dados parciais ou incorretos
-             self.url_entry.delete(0, tk.END)
-             self.login_entry.delete(0, tk.END)
-             self.token_entry.delete(0, tk.END)
-             self.diretorio_var.set(config.DIRETORIO_BASE_GRAVACOES) # Reseta para o diretório padrão
+                logger.info("GUI: Configurações carregadas pelo security_manager e GUI preenchida.")
 
-        except Exception as e:
-            # Captura qualquer outro erro inesperado durante o carregamento
-            mensagem_erro = f"Ocorreu um erro inesperado ao carregar configurações de {CONFIG_FILE}: {e}"
-            self.atualizar_status(mensagem_erro) # Tente exibir o erro na GUI
-            logger.error(mensagem_erro, exc_info=True)
-            # Considere limpar os campos aqui também, dependendo da gravidade do erro
-            self.url_entry.delete(0, tk.END)
-            self.login_entry.delete(0, tk.END)
-            self.token_entry.delete(0, tk.END)
-            self.diretorio_var.set(config.DIRETORIO_BASE_GRAVACOES)
+            except Exception as e:
+                 # Captura erros durante o preenchimento da GUI após carregar as configurações
+                 mensagem_erro = f"Erro GUI: Erro ao preencher a GUI com configurações carregadas: {e}. Configurações podem estar corrompidas ou incompletas."
+                 self.atualizar_status(mensagem_erro)
+                 logger.error(mensagem_erro, exc_info=True)
+                 # Limpa os campos para evitar carregar dados parciais ou incorretos
+                 self._clear_gui_fields()
+                 # Define as datas iniciais padrão nos DateEntry após limpar
+                 self._set_default_dates_in_dateentry()
+
+
+        else:
+            # Se security_manager.load_configuration retornou None (arquivo não encontrado ou erro de carregamento no manager)
+            # A mensagem de erro (se houver) já foi logada pelo security_manager.
+            # Garantimos que os campos da GUI estejam vazios (exceto pelo diretório padrão e datas padrão nos DateEntry).
+            logger.info("GUI: Carregamento de configurações via security_manager retornou None. GUI inicializada com padrões/vazio.")
+            self._clear_gui_fields() # Limpa todos os campos
+            # Garante que os campos DateEntry mostrem a data atual
+            self._set_default_dates_in_dateentry()
+
+
+    def _clear_gui_fields(self):
+        """Limpa todos os campos de entrada na GUI."""
+        self.url_entry.delete(0, tk.END)
+        self.login_entry.delete(0, tk.END)
+        self.token_entry.delete(0, tk.END)
+        self.diretorio_var.set(config.DIRETORIO_BASE_GRAVACOES)
+        self.datainicio_entry.entry.delete(0, tk.END)
+        self.datafim_entry.entry.delete(0, tk.END)
+        logger.debug("GUI: Campos da GUI limpos.")
+
+
+    def _set_default_dates_in_dateentry(self):
+         """Define as datas padrão (data atual) nos widgets DateEntry."""
+         try:
+             today_date_str = datetime.now().strftime("%Y-%m-%d")
+             self.datainicio_entry.entry.delete(0, tk.END)
+             self.datainicio_entry.entry.insert(0, today_date_str)
+             self.datafim_entry.entry.delete(0, tk.END)
+             self.datafim_entry.entry.insert(0, today_date_str)
+             logger.debug(f"GUI: Datas padrão ({today_date_str}) definidas nos campos DateEntry.")
+         except Exception as e:
+              logger.error(f"GUI: Erro ao definir datas padrão nos campos DateEntry: {e}")
+
+
+    # --- Métodos de Processamento em Thread (REMOVIDOS - Agora no DownloadController) ---
+    # As funções processar_download e _processar_sem_gravacao foram movidas para download_controller.py.
+    # def processar_download(self, ...): pass
+    # def _processar_sem_gravacao(self, ...): pass
